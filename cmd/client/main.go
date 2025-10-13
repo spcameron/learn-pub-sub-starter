@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -43,10 +42,38 @@ func main() {
 
 	log.Printf("queue name: %s", queue.Name)
 
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
+	gamestate := gamelogic.NewGameState(name)
 
-	fmt.Println("\nProgram is shutting down...")
+	for {
+		words := gamelogic.GetInput()
+		if len(words) == 0 {
+			continue
+		}
 
+		cmd := words[0]
+		switch cmd {
+		case "spawn":
+			if err := gamestate.CommandSpawn(words); err != nil {
+				log.Fatalf("gamestate/CommandSpawn error: %v", err)
+			}
+		case "move":
+			mv, err := gamestate.CommandMove(words)
+			if err != nil {
+				log.Fatalf("gamestate/CommandMove error: %v", err)
+			}
+			fmt.Printf("Move successful: %v", mv)
+		case "status":
+			gamestate.CommandStatus()
+		case "help":
+			gamelogic.PrintClientHelp()
+		case "spam":
+			fmt.Println("Spamming not allowed yet!")
+		case "quit":
+			gamelogic.PrintQuit()
+			os.Exit(0)
+		default:
+			fmt.Printf("Unrecognized command: %s", cmd)
+			continue
+		}
+	}
 }
