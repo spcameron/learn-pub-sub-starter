@@ -51,7 +51,7 @@ func main() {
 		log.Fatalf("amqp/QueueBind error: %v", err)
 	}
 
-	gamelogic.PrintClientHelp()
+	gamelogic.PrintServerHelp()
 
 	for {
 		words := gamelogic.GetInput()
