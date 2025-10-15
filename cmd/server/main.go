@@ -15,13 +15,13 @@ func main() {
 	fmt.Println("Starting Peril server...")
 
 	connectionString := "amqp://guest:guest@localhost:5672/"
-	connection, err := amqp.Dial(connectionString)
+	conn, err := amqp.Dial(connectionString)
 	if err != nil {
 		log.Fatalf("amqp/Dial error: %v", err)
 	}
-	defer connection.Close()
+	defer conn.Close()
 
-	channel, err := connection.Channel()
+	channel, err := conn.Channel()
 	if err != nil {
 		log.Fatalf("amqp/Channel error: %v", err)
 	}
@@ -29,26 +29,15 @@ func main() {
 	fmt.Println("Connection successful...")
 	fmt.Println("Declaring queue...")
 
-	queue, err := channel.QueueDeclare(
-		routing.GameLogSlug,
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		log.Fatalf("amqp/QueueDeclare error: %v", err)
-	}
-
-	if err := channel.QueueBind(
-		queue.Name,
-		routing.GameLogSlug+".*",
-		routing.ExchangePerilTopic,
-		false,
-		nil,
+	if err := pubsub.SubscribeGob(
+		conn,
+		string(routing.ExchangePerilTopic),
+		string(routing.GameLogSlug),
+		string(routing.GameLogSlug)+".*",
+		pubsub.SimpleQueueDurable,
+		handlerLogs(),
 	); err != nil {
-		log.Fatalf("amqp/QueueBind error: %v", err)
+		log.Fatalf("pubsub/SubscribeGob error: %v", err)
 	}
 
 	gamelogic.PrintServerHelp()
@@ -100,5 +89,15 @@ func commandResume(channel *amqp.Channel) {
 		},
 	); err != nil {
 		log.Fatalf("pubsub/PublishJSON error: %v", err)
+	}
+}
+
+func handlerLogs() func(routing.GameLog) pubsub.Acktype {
+	return func(gamelog routing.GameLog) pubsub.Acktype {
+		defer fmt.Print("> ")
+		if err := gamelogic.WriteLog(gamelog); err != nil {
+			return pubsub.NackRequeue
+		}
+		return pubsub.Ack
 	}
 }

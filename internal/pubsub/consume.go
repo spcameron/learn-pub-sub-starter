@@ -1,6 +1,8 @@
 package pubsub
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,6 +33,46 @@ func SubscribeJSON[T any](
 	queueType SimpleQueueType,
 	handler func(T) Acktype,
 ) error {
+	unmarshaller := func(data []byte) (T, error) {
+		var target T
+		err := json.Unmarshal(data, &target)
+		return target, err
+	}
+
+	return subscribe(conn, exchange, queueName, key, queueType, handler, unmarshaller)
+}
+
+func SubscribeGob[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	queueType SimpleQueueType,
+	handler func(T) Acktype,
+) error {
+	unmarshaller := func(data []byte) (T, error) {
+		buffer := bytes.NewReader(data)
+		dec := gob.NewDecoder(buffer)
+
+		var target T
+		if err := dec.Decode(&target); err != nil {
+			return target, err
+		}
+
+		return target, nil
+	}
+	return subscribe(conn, exchange, queueName, key, queueType, handler, unmarshaller)
+}
+
+func subscribe[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	queueType SimpleQueueType,
+	handler func(T) Acktype,
+	unmarshaller func([]byte) (T, error),
+) error {
 	ch, queue, err := DeclareAndBind(
 		conn,
 		exchange,
@@ -39,7 +81,7 @@ func SubscribeJSON[T any](
 		queueType,
 	)
 	if err != nil {
-		return fmt.Errorf("pubsub/DeclareAndBuild error: %w", err)
+		return fmt.Errorf("pubsub/DeclareAndBind error: %w", err)
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
@@ -47,36 +89,30 @@ func SubscribeJSON[T any](
 		return fmt.Errorf("amqp/Consume error: %w", err)
 	}
 
-	unmarshaller := func(data []byte) (T, error) {
-		var target T
-		err := json.Unmarshal(data, &target)
-		return target, err
-	}
-
 	go func() {
 		defer ch.Close()
 		for msg := range msgs {
 			target, err := unmarshaller(msg.Body)
 			if err != nil {
-				fmt.Printf("json/Unmarshal error: %v\n", err)
+				fmt.Printf("Unmarshal error: %v\n", err)
+				continue
 			}
+
 			resp := handler(target)
 			switch resp {
 			case Ack:
 				msg.Ack(false)
-				log.Printf("received %v, called msg.Ack(false)\n", resp)
 			case NackRequeue:
 				msg.Nack(false, true)
-				log.Printf("received %v, called msg.Nack(false, true)\n", resp)
 			case NackDiscard:
 				msg.Nack(false, false)
-				log.Printf("received %v, called msg.Nack(false, false)\n", resp)
 			default:
 				log.Printf("unrecognized handler response: %v\n", resp)
 			}
 
 		}
 	}()
+
 	return nil
 }
 
